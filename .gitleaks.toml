@@ -1,0 +1,19 @@
+# Gitleaks configuration for the Hybrid-Secure-ACR prototype (Gate 0 evidence).
+# Extends the Gitleaks default ruleset so the standard detectors (aws-access-token,
+# generic-api-key, private-key, etc.) all remain active, and adds one explicit
+# rule for the demonstration DB password so the dissertation fixture reliably
+# produces a finding for Appendix I screenshot #2.
+title = "hybrid-secure-acr-gitleaks"
+
+[extend]
+useDefault = true   # keep all built-in Gitleaks rules
+
+[[rules]]
+id = "acr-demo-db-password"
+description = "Hard-coded database password (dissertation Gate 0 demo)"
+regex = '''(?i)DB_PASSWORD\s*=\s*["'][^"']{8,}["']'''
+tags = ["password", "CWE-798"]
+
+# NOTE: we intentionally do NOT add the AWS example key AKIAIOSFODNN7EXAMPLE to
+# any allowlist; the fixture uses a non-example fake key so the default
+# aws-access-token rule fires. No real secrets exist in this repository.

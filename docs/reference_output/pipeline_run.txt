@@ -1,0 +1,20 @@
+================================================================
+ Hybrid-Secure-ACR  |  config=hybrid  |  run=a885ea685d29
+================================================================
+ G0 Secrets Scanner              -> PASS
+ G1 SAST (Semgrep + Bandit)      -> PASS
+ G2 Adversarial Input Filter     -> PASS
+ G3 Constrained LLM Review       -> PASS
+      - [HIGH    ] CWE-639   Resource accessed by request-supplied id without ownership check  (verified)
+      - [HIGH    ] CWE-918   Outbound request to user-controlled URL (possible SSRF)  (verified)
+ G4 Output Validation Filter     -> PASS
+      - [HIGH    ] CWE-639   Resource accessed by request-supplied id without ownership check  (verified)
+      - [HIGH    ] CWE-918   Outbound request to user-controlled URL (possible SSRF)  (verified)
+ G5 HITL Escalation Gate         -> ESCALATE
+      - [HIGH    ] CWE-639   Resource accessed by request-supplied id without ownership check  (verified)
+      - [HIGH    ] CWE-918   Outbound request to user-controlled URL (possible SSRF)  (verified)
+================================================================
+ Findings: 2  by source: {'llm-review': 2}
+ Max severity: HIGH
+ FINAL DECISION: ESCALATE
+================================================================

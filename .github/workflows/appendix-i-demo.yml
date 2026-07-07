@@ -1,0 +1,153 @@
+name: Hybrid-Secure-ACR (Appendix I demo)
+
+# This workflow is structured so that each stage in Appendix I of the
+# dissertation corresponds to a real, separately-visible job/step that produces
+# capturable output:
+#   Job 1 (scan)     -> Gitleaks step, Semgrep step, Bandit step, Claude JSON step
+#   Job 2 (approval) -> GitHub Environment "security-review" protection gate
+#
+# It is intended to be triggered manually (workflow_dispatch) against a branch
+# that contains the vulnerable fixtures, so every gate fires and every screen
+# has something to show. See docs/APPENDIX_I_CAPTURE_GUIDE.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "Pipeline configuration arm"
+        default: "hybrid"
+        type: choice
+        options: [ hybrid, sast-only, llm-augmented ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scan:
+    name: Security scan (G0-G4)
+    runs-on: ubuntu-latest
+    outputs:
+      decision: ${{ steps.acr.outputs.decision }}
+      exit_code: ${{ steps.acr.outputs.exit_code }}
+    steps:
+      - name: Checkout (full history — required by Gitleaks)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ---- Appendix I screenshot #2: Gitleaks detection ----
+      # Real Gitleaks action. Runs against the repo history + working tree and
+      # writes a SARIF + summary. Set to continue-on-error so the run proceeds
+      # to the other stages for the screenshots; the finding is still visible in
+      # the step log and the uploaded report.
+      - name: Gitleaks secret scan (Gate 0)
+        id: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+      # ---- Appendix I screenshot #3: Semgrep results ----
+      - name: Semgrep SAST (Gate 1a)
+        id: semgrep
+        run: |
+          pip install semgrep
+          echo "::group::Semgrep findings"
+          semgrep scan --config rulesets/semgrep-acr.yml \
+            --error --json --output semgrep.json fixtures/ || true
+          python -c "import json;d=json.load(open('semgrep.json'));print(f'Semgrep: {len(d[\"results\"])} findings');[print(f' - {r[\"check_id\"]} @ {r[\"path\"]}:{r[\"start\"][\"line\"]}') for r in d['results']]"
+          echo "::endgroup::"
+
+      # ---- Appendix I screenshot #3: Bandit results ----
+      - name: Bandit SAST (Gate 1b)
+        id: bandit
+        run: |
+          pip install bandit
+          echo "::group::Bandit findings"
+          bandit -r fixtures/ -f json -o bandit.json || true
+          python -c "import json;d=json.load(open('bandit.json'));print(f'Bandit: {len(d[\"results\"])} findings');[print(f' - {r[\"test_id\"]} {r[\"issue_severity\"]} @ {r[\"filename\"]}:{r[\"line_number\"]}') for r in d['results']]"
+          echo "::endgroup::"
+
+      # ---- Appendix I screenshot #4: Claude JSON response ----
+      # Runs the constrained LLM gate against the real Anthropic API and prints
+      # the raw JSON contract response. Requires the ANTHROPIC_API_KEY secret.
+      # Falls back to the mock backend (still valid JSON) if no key is set, and
+      # the step log states which backend produced the output.
+      - name: Claude constrained review (Gate 3)
+        id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ACR_LLM_BACKEND: ${{ secrets.ANTHROPIC_API_KEY != '' && 'anthropic' || 'mock' }}
+          ACR_LLM_MODEL: ${{ vars.ACR_LLM_MODEL || 'claude-sonnet-4-6' }}
+        run: |
+          echo "Backend: $ACR_LLM_BACKEND"
+          python scripts/claude_review_demo.py fixtures/vuln_idor.py | tee claude_response.json
+          echo "::notice::Claude JSON contract response captured above."
+
+      # ---- Appendix I screenshot #1: full pipeline decision in the run log ----
+      - name: Run full Hybrid-Secure-ACR pipeline
+        id: acr
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ACR_LLM_BACKEND: ${{ secrets.ANTHROPIC_API_KEY != '' && 'anthropic' || 'mock' }}
+        run: |
+          set +e
+          # Scanned WITHOUT --sensitive so a HIGH logic finding routes to
+          # ESCALATE (human approval) rather than a hard BLOCK — this is what
+          # pauses the run at the security-review environment gate.
+          python -m hybrid_acr.cli scan fixtures/vuln_idor.py \
+            --config "${{ github.event.inputs.config || 'hybrid' }}" \
+            --ledger audit/ledger.jsonl
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          case $code in
+            0) echo "decision=PASS" >> "$GITHUB_OUTPUT" ;;
+            1) echo "decision=ESCALATE" >> "$GITHUB_OUTPUT" ;;
+            2) echo "decision=BLOCK" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appendix-i-evidence
+          path: |
+            semgrep.json
+            bandit.json
+            claude_response.json
+            audit/ledger.jsonl
+
+  # ---- Appendix I screenshot #5: GitHub Environment approval screen ----
+  # This job targets a GitHub Environment named "security-review". Configure the
+  # environment in repo Settings -> Environments with a Required reviewers
+  # protection rule. When the scan escalates, this job pauses and GitHub shows
+  # the approval screen ("Review pending deployments") to the named reviewer.
+  human-approval:
+    name: Human-in-the-loop approval (Gate 5)
+    needs: scan
+    if: needs.scan.outputs.decision == 'ESCALATE' || needs.scan.outputs.decision == 'BLOCK'
+    runs-on: ubuntu-latest
+    environment:
+      name: security-review
+    steps:
+      - name: Record reviewer decision
+        run: |
+          echo "Human reviewer approved escalated change."
+          echo "Pipeline decision was: ${{ needs.scan.outputs.decision }}"
+          echo "This step only runs AFTER a required reviewer approves the"
+          echo "security-review environment (the approval screen in Appendix I)."

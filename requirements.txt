@@ -1,0 +1,7 @@
+# SAST tooling (Gate 1) - deterministic, open-source, per proposal Table 3
+semgrep>=1.0
+bandit>=1.7
+# Real LLM backend (Gate 3) - only needed when ACR_LLM_BACKEND=anthropic
+anthropic>=0.40
+# Test runner
+pytest>=7.0

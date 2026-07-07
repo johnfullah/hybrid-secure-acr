@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "rule_id": "llm.idor.missing-authz",
+      "title": "Resource accessed by request-supplied id without ownership check",
+      "severity": "HIGH",
+      "cwe": "CWE-639",
+      "line": 10,
+      "confidence": 0.72,
+      "rationale": "Endpoint resolves a resource from a client-supplied identifier with no check that the authenticated principal owns or may access it (IDOR / missing authorization)."
+    },
+    {
+      "rule_id": "llm.ssrf.user-controlled-url",
+      "title": "Outbound request to user-controlled URL (possible SSRF)",
+      "severity": "HIGH",
+      "cwe": "CWE-918",
+      "line": 0,
+      "confidence": 0.61,
+      "rationale": "A network request target is derived from request input without allowlisting; may permit SSRF to internal services."
+    }
+  ]
+}

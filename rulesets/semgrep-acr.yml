@@ -1,0 +1,16 @@
+# Local Semgrep ruleset (secondary artefact). The pipeline defaults to the
+# hosted "p/ci" pack; point G1 at this file to use these custom rules instead.
+rules:
+  - id: acr-sql-string-concat
+    languages: [python]
+    severity: ERROR
+    message: "SQL built via string concatenation (CWE-89)."
+    metadata: { cwe: "CWE-89: SQL Injection" }
+    mode: taint
+    pattern-sources:
+      - pattern: |
+          "$SQL" + $X
+      - pattern: |
+          "$SQL" % $X
+    pattern-sinks:
+      - pattern: $DB.execute(...)
